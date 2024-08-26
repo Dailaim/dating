@@ -9,9 +9,26 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@biomejs/biome": "^1.8.3",
+    "@paralleldrive/cuid2": "^2.2.2",
+    "@radix-ui/react-avatar": "^1.1.0",
+    "@radix-ui/react-icons": "^1.3.0",
+    "@radix-ui/react-scroll-area": "^1.1.0",
+    "@radix-ui/react-slot": "^1.1.0",
+    "@stomp/stompjs": "^7.0.0",
+    "@types/sockjs-client": "^1.5.4",
+    "@types/stompjs": "^2.3.9",
+    "class-variance-authority": "^0.7.0",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.435.0",
+    "next": "14.2.6",
     "react": "^18",
     "react-dom": "^18",
-    "next": "14.2.6"
+    "react-stomp-hooks": "^3.0.1",
+    "sockjs-client": "^1.6.1",
+    "stompjs": "^2.3.3",
+    "tailwind-merge": "^2.5.2",
+    "tailwindcss-animate": "^1.0.7"
   },
   "devDependencies": {
     "typescript": "^5",
