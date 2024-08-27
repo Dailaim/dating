@@ -15,15 +15,17 @@ import { useEffect, useRef, useState } from "react";
 
 import { createId } from "@paralleldrive/cuid2";
 import { Client } from "@stomp/stompjs";
-import { client } from "stompjs";
 
 import { create } from "zustand";
 
 import { immer } from "zustand/middleware/immer";
 
+import { persist } from "zustand/middleware";
+
 import { cn } from "@/lib/utils";
 
 import { mountStoreDevtool } from "simple-zustand-devtools";
+import { getConnects } from "./connects";
 
 type message = {
 	id: string | number;
@@ -51,26 +53,32 @@ type store = {
 };
 
 const useChat = create<store>()(
-	immer((set) => ({
-		chats: {},
-		setChat: (mm, subID) => {
-			set((state) => {
-				const sender = subID ?? mm.sender;
-				const id = mm.id;
+	persist(
+		immer((set) => ({
+			chats: {},
+			setChat: (mm, subID) => {
+				set((state) => {
+					const sender = subID ?? mm.sender;
+					const id = mm.id;
 
-				if (!state.chats[sender]) {
-					state.chats[sender] = {};
-				}
+					if (!state.chats[sender]) {
+						state.chats[sender] = {};
+					}
 
-				if (state.chats[sender][id]) return;
+					if (state.chats[sender][id]) return;
 
-				state.chats[sender][id] = mm;
-			});
+					state.chats[sender][id] = mm;
+				});
+			},
+		})),
+		{
+			name: "chat-pc",
+			version: 1,
 		},
-	})),
+	),
 );
 
-mountStoreDevtool("Store", useChat);
+mountStoreDevtool("chat", useChat);
 
 // Placeholder data
 const matches = [
@@ -108,11 +116,39 @@ const wait = (time: number) => {
 	});
 };
 
+const useConnectionStatus = create<{
+	connections: {
+		[user_id: string]: boolean;
+	};
+
+	setInitConnection: (del: { [user_id: string]: boolean }) => void;
+
+	setConnectionStatus: (id: string, conect: boolean) => void;
+}>()(
+	immer((set) => ({
+		connections: {},
+		setConnectionStatus: (userId, isConnected) => {
+			set((state) => {
+				state.connections[userId] = isConnected;
+			});
+		},
+
+		setInitConnection: (inits) => {
+			set((state) => {
+				state.connections = inits;
+			});
+		},
+	})),
+);
+
 export function Chat({ id }: { id?: string }) {
 	const defauld = matches.filter((val) => val.id !== id);
 	const [activeMatch, setActiveMatch] = useState(defauld[0]);
 
 	const { chats, setChat } = useChat();
+
+	const { setConnectionStatus, connections, setInitConnection } =
+		useConnectionStatus();
 
 	const [inputMessage, setInputMessage] = useState("");
 
@@ -123,7 +159,7 @@ export function Chat({ id }: { id?: string }) {
 	const scrollAreaRef = useRef<HTMLDivElement>(null);
 
 	const downScroll = async () => {
-		await wait(200);
+		// await wait(200);
 		const scrollArea = scrollAreaRef.current;
 		if (scrollArea) {
 			scrollArea.scrollTo(0, scrollArea.scrollHeight);
@@ -132,13 +168,13 @@ export function Chat({ id }: { id?: string }) {
 
 	useEffect(() => {
 		downScroll();
-	}, []); // Ejecutar al montar el componente o cuando el contenido cambie
+	}, [chats[activeMatch.id]]); // Ejecutar al montar el componente o cuando el contenido cambie
 
 	useEffect(() => {
 		// Conectar con STOMP utilizando SockJS
 
 		const client = new Client({
-			brokerURL: "ws://8.tcp.ngrok.io:19372/ws", // Cambia por tu URL de WebSocket
+			brokerURL: "ws://localhost:15674/ws", // Cambia por tu URL de WebSocket
 			debug: (str) => console.log(str),
 			connectHeaders: {
 				login: "user",
@@ -150,12 +186,20 @@ export function Chat({ id }: { id?: string }) {
 			onStompError: (frame) => {
 				console.error(`Broker error: ${frame.headers.message}`);
 			},
+
+			onDisconnect: () => {
+				client.publish({
+					destination: "/topic/connection-status",
+					body: JSON.stringify({
+						userId: id,
+						isConnected: false,
+					}),
+				});
+			},
 		});
 
-		client.onConnect = () => {
+		client.onConnect = async () => {
 			client.subscribe(`/topic/chat-${id}`, (message) => {
-				console.log(message);
-
 				const newMessage = JSON.parse(message.body) as {
 					id: string | number;
 					sender: string;
@@ -165,8 +209,25 @@ export function Chat({ id }: { id?: string }) {
 
 				if (id !== newMessage.sender) {
 					setChat(newMessage);
-					downScroll();
 				}
+			});
+
+			const init = await getConnects();
+			setInitConnection(init);
+
+			console.log(init);
+
+			client.subscribe("/topic/connections-status", (message) => {
+				const { userId, isConnected } = JSON.parse(message.body);
+				setConnectionStatus(userId, isConnected);
+			});
+
+			client.publish({
+				destination: "/topic/connection-status",
+				body: JSON.stringify({
+					userId: id,
+					isConnected: true,
+				}),
 			});
 		};
 
@@ -200,9 +261,11 @@ export function Chat({ id }: { id?: string }) {
 		});
 
 		setChat(newMessage, activeMatch.id);
-		downScroll();
+
 		setInputMessage("");
 	};
+
+	const userStatus = connections[activeMatch.id] ? "Online" : "Offline";
 
 	return (
 		<div className="flex h-screen mx-auto border rounded-lg overflow-hidden">
@@ -245,7 +308,10 @@ export function Chat({ id }: { id?: string }) {
 							<AvatarImage src={activeMatch.avatar} alt={activeMatch.name} />
 							<AvatarFallback>{activeMatch.name[0]}</AvatarFallback>
 						</Avatar>
-						<h2 className="text-xl font-bold">{activeMatch.name}</h2>
+						<div>
+							<h2 className="text-xl font-bold">{activeMatch.name}</h2>
+							<p className="text-sm text-muted-foreground">{userStatus}</p>
+						</div>
 					</div>
 					<Button size="icon" variant="ghost">
 						<HeartIcon className="h-6 w-6 text-red-500" />
